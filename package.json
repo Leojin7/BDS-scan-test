@@ -50,6 +50,7 @@
     "@actions/github": "5.1.1",
     "@actions/io": "1.1.3",
     "@actions/tool-cache": "2.0.1",
+    "@pinecone-database/pinecone": "^6.1.4",
     "@types/unzipper": "0.10.10",
     "actions-artifact-v1": "npm:@actions/artifact@1.1.0",
     "actions-artifact-v2": "npm:@actions/artifact@2.1.8",

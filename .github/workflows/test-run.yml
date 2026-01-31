@@ -1,9 +1,9 @@
 name: Test Run
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Allows manual triggering only
   push:
-    branches: [main]
+    branches: [main]  # Only runs on main branch
 
 jobs:
   test:
@@ -20,22 +20,18 @@ jobs:
     - name: Install dependencies
       run: npm ci
       
-    - name: Install Inngest CLI
-      run: npm install -g inngest-cli
-      
     - name: Test environment
       run: |
         echo "Environment check:"
         echo "- Node version: $(node -v)"
         echo "- NPM version: $(npm -v)"
-        echo "- Inngest CLI version: $(inngest --version || echo 'Not installed')"
         echo "- Workflow is running in your own repository!"
       env:
+        # These will be masked in logs
         HAS_OPENAI: ${{ secrets.OPENAI_API_KEY != '' && '✅' || '❌' }}
         HAS_PINECONE: ${{ secrets.PINECONE_API_KEY != '' && '✅' || '❌' }}
         
-    - name: Deploy to Inngest
-      run: npx inngest deploy
-      env:
-        INNGEST_EVENT_KEY: ${{ secrets.INNGEST_EVENT_KEY }}
-        INNGEST_ENV: production
+    - name: Build
+      run: npm run build
+      
+    # Add more steps as needed

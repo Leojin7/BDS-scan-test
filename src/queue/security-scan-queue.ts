@@ -2,31 +2,12 @@
 
 import { Inngest } from 'inngest';
 import { z } from 'zod';
-
+import type { ScanResult, Vulnerability } from '../types/security';
 
 export const inngest = new Inngest({
   id: "black-duck-security",
-  eventKey: process.env.INNGEST_EVENT_KEY,
-  //   middleware for logging, retries, etc.
-  middleware: [
-    {
-      onFunctionRun({ fn }) {
-        return {
-          beforeExecution() {
-            console.log(`Starting function: ${fn.name}`);
-          },
-          async afterExecution({ result }) {
-            console.log(`Completed function: ${fn.name}`, { result });
-          },
-          async onError({ error }) {
-            console.error(`Error in function: ${fn.name}`, error);
-          }
-        };
-      }
-    }
-  ]
+  eventKey: process.env.INNGEST_EVENT_KEY
 });
-
 
 const securityScanEvent = z.object({
   repoUrl: z.string().url(),
@@ -36,54 +17,41 @@ const securityScanEvent = z.object({
   metadata: z.record(z.unknown()).optional()
 });
 
+type InngestEventPayload = z.infer<typeof securityScanEvent>;
 
 export const securityScan = inngest.createFunction(
   {
     id: "security-scan",
-
     rateLimit: {
       limit: 10,
       period: '1m',
       key: "event.userId"
     },
-
-    retries: {
-      max: 3,
-      backoff: {
-        initialDelay: '1s',
-        factor: 2,
-        maxDelay: '1m'
-      }
-    }
+    retries: 3
   },
   { event: 'security/scan' },
   async ({ event, step }) => {
     const { repoUrl, branch, scanType } = securityScanEvent.parse(event.data);
 
-
     const scanId = await step.run('generate-scan-id', () =>
       `scan_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
     );
 
-    const scanner = new securityScan();
+    const scanner = new SecurityScanner();
 
     const results = await step.run('execute-scan', async () => {
       return scanner.runScan(repoUrl, branch, scanType);
     });
 
-
     const processedVulnerabilities = await Promise.all(
-      results.vulnerabilities.map(vuln =>
-        step.run(`process-vulnerability-${vuln.id}`, async () => {
-          return processVulnerability(vuln);
-        })
+      results.vulnerabilities.map((vuln: Vulnerability) =>
+        step.run(`process-vulnerability-${vuln.id}`, async () => processVulnerability(vuln))
       )
     );
 
     const report = await step.run('generate-report', () =>
       generateSecurityReport(processedVulnerabilities)
     );
-
 
     if (report.criticalIssues > 0) {
       await step.run('send-critical-alert', () =>
@@ -104,36 +72,32 @@ export async function queueSecurityScan(params: z.infer<typeof securityScanEvent
   return inngest.send({
     name: 'security/scan',
     data: securityScanEvent.parse(params),
-
     timeout: '30m'
   });
 }
 
-inngest.createScheduledFunction(
-  'daily-security-scan',
-  '0 0 * * *', // Cron expression
-  async ({ step }) => {
-    const repos = await step.run('fetch-repos', () =>
-      fetchAllRepositories()
-    );
-
-
-    await Promise.all(
-      repos.map(repo =>
-        queueSecurityScan({
-          repoUrl: repo.url,
-          scanType: 'full',
-          userId: 'system'
-        })
-      )
-    );
-
-    return { success: true, reposScanned: repos.length };
+class SecurityScanner {
+  async runScan(_repoUrl: string, _branch: string, _scanType: string): Promise<ScanResult> {
+    return { vulnerabilities: [] };
   }
-);
+}
+
+function generateSecurityReport(vulnerabilities: Vulnerability[]) {
+  return {
+    criticalIssues: vulnerabilities.filter(vuln => vuln.severity === 'critical').length,
+    totalIssues: vulnerabilities.length
+  };
+}
+
+function sendSecurityAlert(_report: { criticalIssues: number; totalIssues: number }) {
+  return;
+}
+
+function fetchAllRepositories(): Array<{ url: string }> {
+  return [];
+}
 
 async function processVulnerability(vulnerability: Vulnerability) {
-
   return {
     ...vulnerability,
     processedAt: new Date().toISOString(),

@@ -3,22 +3,50 @@ import { inngest } from '../queue/security-scan-queue';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { OpenAI } from 'openai';
 import { Octokit } from '@octokit/rest';
+import type { ScanResult } from '../types/security';
+
+type AutoFixEvent = {
+  scanResult: ScanResult & {
+    vulnerabilitySignature: number[];
+    vulnerabilityDescription: string;
+    vulnerableCodeSnippet: string;
+    cveId: string;
+    vulnerabilityName: string;
+    repoOwner: string;
+    repoName: string;
+    baseSha: string;
+    baseBranch: string;
+  };
+};
+
+const requireEnv = (key: string): string => {
+  const value = process.env[key];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return value;
+};
 
 export const githubBot = inngest.createFunction(
   { id: "github-bot" },
   { event: "github/auto-fix" },
   async ({ event, step }) => {
-    const { scanResult } = event.data;
+    const { scanResult } = (event?.data ?? {}) as AutoFixEvent;
 
     // Step 1: Find similar vulnerabilities
     const similarIssues = await step.run('find-similar-issues', async () => {
-      const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-      return pinecone.query(scanResult.vulnerabilitySignature, { topK: 5 });
+      const pinecone = new Pinecone({ apiKey: requireEnv('PINECONE_API_KEY') });
+      const index = pinecone.index('vulnerability-fixes');
+      return index.query({
+        vector: scanResult.vulnerabilitySignature,
+        topK: 5
+      });
     });
 
     // Step 2: Generate fix with OpenAI
     const suggestedFix = await step.run('generate-fix', async () => {
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const openai = new OpenAI({ apiKey: requireEnv('OPENAI_API_KEY') });
+
       return openai.chat.completions.create({
         model: "gpt-4",
         messages: [
@@ -37,7 +65,8 @@ export const githubBot = inngest.createFunction(
     // Step 3: Create a new branch
     const branchName = `fix/${scanResult.cveId}-${Date.now()}`;
     await step.run('create-branch', async () => {
-      const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+      const octokit = new Octokit({ auth: requireEnv('GITHUB_TOKEN') });
+
       return octokit.git.createRef({
         owner: scanResult.repoOwner,
         repo: scanResult.repoName,
@@ -48,7 +77,7 @@ export const githubBot = inngest.createFunction(
 
     // Step 4: Open a PR
     const pr = await step.run('create-pr', async () => {
-      const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+      const octokit = new Octokit({ auth: requireEnv('GITHUB_TOKEN') });
       return octokit.pulls.create({
         owner: scanResult.repoOwner,
         repo: scanResult.repoName,

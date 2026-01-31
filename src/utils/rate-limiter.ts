@@ -1,6 +1,5 @@
 // src/utils/rate-limiter.ts
 import { inngest } from '../queue/security-scan-queue';
-import { z } from 'zod';
 
 export const rateLimitedFunction = inngest.createFunction(
   {

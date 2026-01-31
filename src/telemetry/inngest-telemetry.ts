@@ -1,5 +1,6 @@
 // src/telemetry/inngest-telemetry.ts
-import { InngestMiddleware } from 'inngest';
+import type { InngestMiddleware } from 'inngest';
+
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
@@ -22,11 +23,16 @@ provider.addSpanProcessor(
 provider.register();
 
 // Inngest middleware for OpenTelemetry
-export const otelMiddleware: InngestMiddleware = {
+type FunctionContext = {
+  event: { name: string };
+  runId: string;
+};
+
+export const otelMiddleware: InngestMiddleware<any> = {
   name: 'OpenTelemetry Middleware',
   init() {
     return {
-      onFunctionRun({ fn, ctx }) {
+      onFunctionRun({ fn, ctx }: { fn: { name: string }; ctx: FunctionContext }) {
         const tracer = provider.getTracer('inngest');
         const span = tracer.startSpan(`inngest.fn.${fn.name}`);
 
@@ -42,8 +48,8 @@ export const otelMiddleware: InngestMiddleware = {
           async afterExecution() {
             span.end();
           },
-          async onError({ error }) {
-            span.recordException(error);
+          async onError({ error }: { error: unknown }) {
+            span.recordException(error as Error);
             span.end();
           }
         };
@@ -51,9 +57,3 @@ export const otelMiddleware: InngestMiddleware = {
     };
   }
 };
-
-// Add middleware when initializing Inngest
-export const inngest = new Inngest({
-  id: "black-duck-security",
-  middleware: [otelMiddleware]
-});
